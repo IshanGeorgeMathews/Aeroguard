@@ -9,6 +9,7 @@ import logging
 from flask import Blueprint, request, jsonify
 from database import get_db
 from constants import GPS_FALLBACK_LAT as FALLBACK_LAT, GPS_FALLBACK_LON as FALLBACK_LON, GPS_FALLBACK_NAME as FALLBACK_NAME
+from engine.ml_inference import generate_explanation, compute_rain_probability, safety_decision
 
 
 log = logging.getLogger(__name__)
@@ -46,6 +47,16 @@ def get_status():
         """).fetchone()
 
         if row is None:
+            # Generate a default explanation with safe values
+            _default_sensor = {
+                "zone_encoded": 0, "hdop": 1.0, "satellites": 8,
+                "temperature": 25.0, "humidity": 55.0, "pressure": 1013.0,
+                "light_level": 500, "rain_detected": 0, "vibration_rms": 0.0,
+                "vibration_trend": 0.0, "tilt_angle": 0.0, "sensor_fault_flag": 0,
+                "telemetry_loss": 0, "charge_current": 1.5, "current_variation": 0.0,
+                "dock_voltage": 14.4, "charging_state": 1,
+            }
+            _default_expl = generate_explanation(_default_sensor, 0.0, 20.0, "Safe")
             return jsonify({
                 "status": "NO_DATA",
                 "message": "No telemetry received yet. Waiting for Arduino...",
@@ -65,6 +76,8 @@ def get_status():
                 "drone": {},
                 "rain_probability": 0.0,
                 "relay_action": "ALLOW",
+                "ml_explanation": _default_expl,
+                "ml_decision": "Safe",
             })
 
         s = dict(row)
@@ -81,16 +94,42 @@ def get_status():
         using_fb     = bool(s.get("using_fallback_gps", 1))
         loc_name     = s.get("location_name") or (FALLBACK_NAME if using_fb else "Live GPS")
 
-        # Rain probability – try to get from latest risk score event or estimate
-        rain_prob = 0.1  # default
-        rain_row = conn.execute("""
-            SELECT risk_index FROM risk_scores ORDER BY id DESC LIMIT 1
-        """).fetchone()
-        if rain_row:
-            # Simple estimate: rain probability correlates with humidity + water sensor
-            humidity = s.get("humidity") or 55.0
-            water    = s.get("water")    or 0
+        # Rain probability – compute via ML model (temperature + humidity)
+        humidity = s.get("humidity") or 55.0
+        temperature = s.get("temperature") or 25.0
+        water = s.get("water") or 0
+        try:
+            rain_prob = compute_rain_probability(temperature, humidity)
+        except Exception:
             rain_prob = round(min(1.0, (humidity / 100) * 0.4 + (water / 1023) * 0.6), 4)
+
+        # ML explanation – build sensor dict from latest row
+        _ml_score = r.get("safety_score") or 20.0
+        _ml_decision_str = safety_decision(float(_ml_score))
+        _sensor_for_ml = {
+            "zone_encoded":      {"GREEN": 0, "YELLOW": 1, "RED": 2}.get(str(s.get("zone", "GREEN")).upper(), 1),
+            "hdop":             s.get("hdop") or 1.0,
+            "satellites":       s.get("satellites") or 8,
+            "temperature":      temperature,
+            "humidity":         humidity,
+            "pressure":         s.get("pressure") or 1013.0,
+            "light_level":      int(s.get("ldr") or 500),
+            "rain_detected":    1 if s.get("rain_detected") else 0,
+            "vibration_rms":    float(((s.get("acc_x") or 0)**2 + (s.get("acc_y") or 0)**2 + (s.get("acc_z") or 0)**2)**0.5),
+            "vibration_trend":  0.0,
+            "tilt_angle":       s.get("tilt_angle") or 0.0,
+            "sensor_fault_flag": 1 if s.get("sensor_failure") else 0,
+            "telemetry_loss":   0,
+            "charge_current":   s.get("charging_current") or 1.5,
+            "current_variation": 0.0,
+            "dock_voltage":     s.get("voltage") or 14.4,
+            "charging_state":   1,
+        }
+        try:
+            ml_explanation = generate_explanation(_sensor_for_ml, rain_prob, float(_ml_score), _ml_decision_str)
+        except Exception as e:
+            log.warning("ML explanation error: %s", e)
+            ml_explanation = "ML explanation unavailable."
 
         return jsonify({
             # ── Top-level risk ────────────────────────────────────────────────
@@ -168,6 +207,10 @@ def get_status():
             "triggered_l1": [x for x in (r.get("level1_triggered") or "").split(", ") if x],
             "triggered_l2": [x for x in (r.get("level2_triggered") or "").split(", ") if x],
             "triggered_l3": [x for x in (r.get("level3_triggered") or "").split(", ") if x],
+
+            # ── ML Engine output ──────────────────────────────────────────────
+            "ml_explanation": ml_explanation,
+            "ml_decision":    _ml_decision_str,
         })
 
     finally:

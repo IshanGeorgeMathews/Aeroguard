@@ -93,6 +93,12 @@ function buildSimState(prev, failsafe) {
       : [],
     triggered_l2: failsafe ? [] : ["LOW_SATELLITES (2)"],
     triggered_l3: [],
+
+    // ML Engine
+    ml_decision: failsafe ? "Not Safe" : "Safe",
+    ml_explanation: failsafe
+      ? `UAV Safety Assessment — Decision: Not Safe (score: 85.0/100)\n\nRisk Factors:\n  ⚠ CRITICAL: Zone is RED (restricted) — flight is prohibited.\n  ⚠ CRITICAL: Sensor fault detected — system integrity compromised.\n  ⚠ CRITICAL: Vibration RMS=6.10 — severe mechanical abnormality.\n\nOperational Recommendation:\n  Do NOT launch. Resolve all critical issues before attempting flight.\n\nSummary: ML safety score 85.0/100 in zone RED (restricted).\nDecision 'Not Safe' based on critical fault(s).`
+      : `UAV Safety Assessment — Decision: Safe (score: 18.0/100)\n\nRisk Factors:\n  ✓ No significant risk factors detected.\n\nOperational Recommendation:\n  Conditions are acceptable. Conduct normal pre-flight checklist and proceed.\n\nSummary: ML safety score 18.0/100 in zone GREEN (permitted).\nDecision 'Safe' based on nominal readings.`,
   };
   return base;
 }
@@ -120,6 +126,9 @@ function transformApiResponse(json) {
     triggered_l1: json.triggered_l1 ?? [],
     triggered_l2: json.triggered_l2 ?? [],
     triggered_l3: json.triggered_l3 ?? [],
+    // ML Engine
+    ml_explanation: json.ml_explanation ?? "",
+    ml_decision:    json.ml_decision    ?? "Safe",
   };
 }
 
@@ -276,6 +285,10 @@ export function SystemProvider({ children }) {
     rainProbability: state.rain_probability ?? 0,
     zoneStatus: state.zone_status ?? "GREEN",
     relayAction: state.relay_action ?? "ALLOW",
+
+    // ML Engine
+    ml_explanation: state.ml_explanation ?? "",
+    ml_decision:    state.ml_decision    ?? "Safe",
   };
 
   return (

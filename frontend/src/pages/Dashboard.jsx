@@ -78,6 +78,24 @@ function RiskCircle({ index, level }) {
 }
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
+// ─── ML Explanation line renderer ────────────────────────────────────────────
+function ExplainLine({ text }) {
+    let color = "#94a3b8";
+    if (text.startsWith("  ⚠ CRITICAL:")) color = "#ef4444";
+    else if (text.startsWith("  ⚡ CAUTION:")) color = "#facc15";
+    else if (text.startsWith("  ✓")) color = "#22c55e";
+    else if (text.startsWith("UAV Safety") || text.startsWith("Risk") ||
+        text.startsWith("Operational") || text.startsWith("Summary")) {
+        color = "#cbd5e1";
+    }
+    return (
+        <div style={{
+            fontFamily: "monospace", fontSize: 12, color, lineHeight: 1.7,
+            whiteSpace: "pre-wrap"
+        }}>{text || "\u00a0"}</div>
+    );
+}
+
 export default function Dashboard() {
     const {
         risk_index, risk_level, safety_score, rain_probability,
@@ -86,6 +104,7 @@ export default function Dashboard() {
         triggered_l1, triggered_l2, triggered_l3,
         history,
         backendOnline,
+        ml_explanation, ml_decision,
     } = useSystem();
 
     const env = environment ?? {};
@@ -450,6 +469,60 @@ export default function Dashboard() {
                             ))}
                         </div>
                     )}
+                </Card>
+
+                {/* ── 11. ML Engine Assessment ──────────────────────────────── */}
+                <Card title="ML Engine Assessment" accent="#6366F1" style={{ gridColumn: "1 / -1" }}>
+                    {/* Header row: ML decision badge + score */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                        <div style={{
+                            padding: "4px 16px", borderRadius: 20, fontSize: 13, fontWeight: 700,
+                            background:
+                                ml_decision === "Not Safe" ? "rgba(239,68,68,0.15)" :
+                                    ml_decision === "Caution" ? "rgba(250,204,21,0.12)" :
+                                        "rgba(34,197,94,0.12)",
+                            border: `1px solid ${ml_decision === "Not Safe" ? "rgba(239,68,68,0.5)" :
+                                    ml_decision === "Caution" ? "rgba(250,204,21,0.4)" :
+                                        "rgba(34,197,94,0.4)"}`,
+                            color:
+                                ml_decision === "Not Safe" ? "#ef4444" :
+                                    ml_decision === "Caution" ? "#facc15" : "#22c55e",
+                        }}>
+                            {ml_decision === "Not Safe" ? "🚫 Not Safe to Fly" :
+                                ml_decision === "Caution" ? "⚠ Caution" : "✓ Safe to Fly"}
+                        </div>
+                        <div style={{ fontSize: 12, color: "#64748b" }}>
+                            ML Safety Score: <span style={{
+                                fontWeight: 700,
+                                color:
+                                    ml_decision === "Not Safe" ? "#ef4444" :
+                                        ml_decision === "Caution" ? "#facc15" : "#22c55e",
+                            }}>{fmt(safety_score, 1)}/100</span>
+                        </div>
+                        <div style={{ fontSize: 12, color: "#64748b" }}>
+                            Rain Probability: <span style={{
+                                fontWeight: 700,
+                                color: clampColor(rain_probability ?? 0, 0.4, 0.7),
+                            }}>{fmt((rain_probability ?? 0) * 100, 0, "%")}</span>
+                        </div>
+                    </div>
+
+                    {/* Explanation body */}
+                    <div style={{
+                        background: "rgba(99,102,241,0.05)",
+                        border: "1px solid rgba(99,102,241,0.15)",
+                        borderRadius: 10,
+                        padding: "14px 16px",
+                    }}>
+                        {ml_explanation
+                            ? ml_explanation.split("\n").map((line, i) =>
+                                <ExplainLine key={i} text={line} />
+                            )
+                            : <div style={{ color: "#475569", fontSize: 13, fontStyle: "italic" }}>
+                                Awaiting sensor data… ML assessment will appear here once data is received.
+                            </div>
+                        }
+                    </div>
                 </Card>
 
             </div>
